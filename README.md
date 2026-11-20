@@ -10,6 +10,7 @@
 ## 功能与方法
 - 茶样批次、浸出观测录入/编辑/删除；重名记录与非法数值明确拒绝。
 - 分位数、ECDF与按批bootstrap中位数区间。中位数置信区间描述估计不确定性，不是下一份茶样的预测区间。
+- 产地/等级校准：为每份茶样登记产地与等级；排队时冻结茶样和两套目标份数，求各格整数份数使两轴同时达标且与实收份数的绝对差之和最小；并列取按产地、等级排序后字典序最小的一组；同格样本平分权重，得到校准后的含水率分布。两轴各自可达却无法同时达标时给出被卡住的目标组，保留生效旧版。并发申请以较新者为准，较早的算完也不能覆盖较新申请。
 - 每次运行冻结参数、观测和SHA256。Redis任务由独立worker计算，写DB与共享产物卷；输入修改不会改写历史结果。
 - 负责人复核不可覆盖；审计记录登录、数据改动、排队、复核与导出；240请求/分钟限流、全局可恢复错误。
 
@@ -31,11 +32,13 @@ docker compose exec -T backend python -m scripts.seed_demo
 1. 09:00 admin登录，查“青禾·秋制一号”。
 2. 09:10 analyst核对 `tea-quantiles-202611-1.csv` 的seed记录。
 3. 09:15 来源录入页检查 `含水率 (%)` 等业务字段，必要时编辑。
-4. 09:20 分析执行页保留默认参数 `{"field": "moisture", "resamples": 2000}`，命名本轮研究。
-5. 09:21 冻结输入并排队，worker实算，结果页自动刷新。
-6. 09:25 阅读核心数值、方法边界、明细与SHA256；发现失败先修数据重跑。
-7. 09:35 admin打开业务复核，写明限制与下一步动作，归档后不可覆盖。
-8. 09:40 viewer读取复核意见并下载CSV，在操作留痕页核对下载事件。
+4. 09:18 来源录入页为每份茶样登记产地与等级。
+5. 09:20 分析执行页保留默认参数 `{"field": "moisture", "resamples": 2000}`，命名本轮研究。
+6. 09:21 冻结输入并排队，worker实算，结果页自动刷新。
+7. 09:25 阅读核心数值、方法边界、明细与SHA256；发现失败先修数据重跑。
+8. 09:30 打开“产地等级校准”，填写产地与等级目标份数并排队，查看校准后含水率分布；无解时阅读被卡住的目标组。
+9. 09:35 admin打开业务复核，写明限制与下一步动作，归档后不可覆盖。
+10. 09:40 viewer读取复核意见并下载CSV，在操作留痕页核对下载事件。
 
 ## 技术与目录
 |部分|实现|
@@ -50,7 +53,14 @@ docker compose exec -T backend python -m scripts.seed_demo
 
 环境变量 `.env.example`：COMPOSE_PROJECT_NAME、FRONTEND_PORT、BACKEND_PORT、DB_PORT、DB_PASSWORD、JWT_SECRET、SEED_DEMO。开发时在本地venv安装backend/requirements.txt，设置DATABASE_URL、REDIS_URL、JWT_SECRET再运行uvicorn；前端开发经Nginx代理 `/api/` 到不带前缀的API。
 
-共享枚举：角色admin/analyst/viewer和队列queued/running/completed/failed；后端`src/constants/enums.py`、认证与worker使用相同值；前端`src/types/enums.js`、状态与角色界面使用相同值。Google Fonts：Noto Serif SC + IBM Plex Mono；断网使用serif/monospace回退。
+共享枚举：角色admin/analyst/viewer、运行队列queued/running/completed/failed、校准状态queued/running/completed/infeasible/failed/superseded；后端`src/constants/enums.py`、认证与worker使用相同值；前端`src/types/enums.js`、状态与角色界面使用相同值。Google Fonts：Noto Serif SC + IBM Plex Mono；断网使用serif/monospace回退。
+
+## 产地/等级校准
+- 目标与快照：产地目标、等级目标均按枚举补零为完整映射，份数须为非负整数；排队时快照每份茶样的`source_key`、`values`、`origin`、`grade`并生成SHA256，之后的登记或录入修改不改写已排队申请。
+- 整数分配：只在有茶样的格子上分配整数份数，行和＝产地目标、列和＝等级目标，最小化`Σ|份数−实收|`。代价为整数，运输网络的最小费用流给出整数最优解；字典序并列通过基`(F+1)`的精确大整数权重合并进同一目标，`(F+1)^N`放大后L1始终优先。
+- 无解诊断：区分“类别缺样”“两套总数不一致”和“两轴各自可达但样本支撑分组内目标不平衡”；报告被卡住的产地/等级组与原目标，且不切换生效版本。
+- 生效规则：worker按批次行锁串行处理；较新申请存在时，较早申请一律superseded，已完成结果只留档。计算完成先核对两轴达标、权重合计与累计分布收敛到1，再一次性切换激活版本；无解或核对失败保留旧版。
+- 独立oracle：随机小规模实例与穷举/纯Python计算对照目标值与字典序解；加权与未加权分布均可用手算分位数核对。详见`backend/TESTING.md`。
 
 ## 算法输入、失败态与复现
 输入为选定批次全部观测和参数，输出核心数值、明细、解释；参数经后端严格白名单和范围验证。中位数置信区间描述估计不确定性，不是下一份茶样的预测区间。。空批次拒绝；不完整字段/非有限数/非法计数拒绝；常量相关列与不足样本使任务failed并保留错误。固定seed42、输入checksum相同可复现。独立oracle：按线性插值手算分位数；固定seed重采样复现；常量与空组边界。

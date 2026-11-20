@@ -6,7 +6,7 @@ from src.config.domain import DOMAIN
 from src.models.user import User
 from src.models.study import Study
 from src.models.observation import Observation
-from src.models import run,review,audit
+from src.models import run,review,audit,calibration
 from src.utils.security import hash_password
 
 def seed():
@@ -33,10 +33,17 @@ def seed():
                 for n in range(90):
                     x=round(float(rng.uniform(4,28)),1);rows.append({'porosity':x,'absorption':round(max(0,x*(.18+k*.08)+rng.normal(0,1.5)),2)})
             else: rows=[{'p0':.08+k*.02,'p1':.1+k*.025,'cost_per_contact':.12+k*.04,'budget':3000+k*500}]
+            origins=DOMAIN['origins'];grades=DOMAIN['grades']
             for n,values in enumerate(rows):
                 key=f'DEMO-{k+1}-{n+1:04}'
-                if not db.scalar(select(Observation.id).where(Observation.study_id==study.id,Observation.source_key==key)):
-                    db.add(Observation(study_id=study.id,source_key=key,values=values))
+                existing=db.scalar(select(Observation).where(Observation.study_id==study.id,Observation.source_key==key))
+                if not existing:
+                    existing=Observation(study_id=study.id,source_key=key,values=values);db.add(existing);db.flush()
+                if i==0 and not db.scalar(select(calibration.SampleLabel).where(calibration.SampleLabel.observation_id==existing.id)):
+                    # Deliberately skewed collection: more 东岭/特级 and 南坡/一级.
+                    origin=origins[0] if n%5 else (origins[1] if n%10 else origins[2])
+                    grade=grades[0] if n%3 else (grades[1] if n%2 else grades[2])
+                    db.add(calibration.SampleLabel(observation_id=existing.id,origin=origin,grade=grade))
         db.commit()
         counts={model.__tablename__:db.scalar(select(func.count()).select_from(model)) for model in (User,Study,Observation)}
         print(json.dumps(counts));return counts

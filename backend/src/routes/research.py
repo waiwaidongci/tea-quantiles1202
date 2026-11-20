@@ -7,11 +7,13 @@ from src.middlewares.auth import current_user,writer,admin
 from src.schemas.study import StudyInput
 from src.schemas.observation import ObservationInput
 from src.schemas.run import RunInput
+from src.schemas.calibration import CalibrationInput,SampleLabelInput
 from src.schemas.review import ReviewInput
 from src.controllers import research
 from src.services import runs,studies
 from src.models.audit import Audit
 from src.models.observation import Observation
+from src.models.calibration import SampleLabel
 from src.services.audits import log
 from src.utils.serializers import record
 router=APIRouter()
@@ -33,7 +35,19 @@ def update(id:int,row_id:int,data:ObservationInput,db=Depends(get_db),user=Depen
 def remove(id:int,row_id:int,db=Depends(get_db),user=Depends(writer)):
     row=db.get(Observation,row_id)
     if not row or row.study_id!=id: raise HTTPException(404,'记录不存在')
+    label=db.scalar(select(SampleLabel).where(SampleLabel.observation_id==row_id))
+    if label: db.delete(label)
     db.delete(row);log(db,user,'observation.delete',row_id);db.commit();return {'deleted':True}
+@router.put('/studies/{id}/observations/{row_id}/label')
+def label(id:int,row_id:int,data:SampleLabelInput,db=Depends(get_db),user=Depends(writer)): return research.label_row(db,id,row_id,data,user)
+@router.get('/calibrations')
+def calibrations_list(study_id:int|None=None,db=Depends(get_db),user=Depends(current_user)): return research.list_calibrations(db,study_id)
+@router.post('/calibrations')
+def calibrations_create(data:CalibrationInput,db=Depends(get_db),user=Depends(writer)): return research.create_calibration(db,data,user)
+@router.get('/calibrations/active')
+def calibrations_active(study_id:int,db=Depends(get_db),user=Depends(current_user)): return research.active_calibration(db,study_id)
+@router.get('/calibrations/{id}')
+def calibrations_get(id:int,db=Depends(get_db),user=Depends(current_user)): return research.get_calibration(db,id)
 @router.get('/runs')
 def list_runs(db=Depends(get_db),user=Depends(current_user)): return runs.list_runs(db)
 @router.post('/runs')

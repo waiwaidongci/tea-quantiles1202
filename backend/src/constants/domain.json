@@ -6,6 +6,18 @@
   "study_label": "茶样批次",
   "row_label": "浸出观测",
   "field_label": "分析指标",
+  "origin_label": "产地",
+  "grade_label": "等级",
+  "origins": [
+    "东岭",
+    "南坡",
+    "西谷"
+  ],
+  "grades": [
+    "特级",
+    "一级",
+    "二级"
+  ],
   "fields": [
     [
       "moisture",

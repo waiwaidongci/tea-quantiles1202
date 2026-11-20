@@ -22,7 +22,16 @@ def require(db,id):
     return s
 
 def observations(db,id):
-    require(db,id);return [record(x) for x in db.scalars(select(Observation).where(Observation.study_id==id).order_by(Observation.id))]
+    require(db,id)
+    from src.services.labels import for_rows
+    labels=for_rows(db,id)
+    out=[]
+    for x in db.scalars(select(Observation).where(Observation.study_id==id).order_by(Observation.id)):
+        row=record(x);label=labels.get(x.id)
+        row['origin']=label.origin if label else None
+        row['grade']=label.grade if label else None
+        out.append(row)
+    return out
 
 def save_observation(db,id,data,user,row_id=None):
     require(db,id)

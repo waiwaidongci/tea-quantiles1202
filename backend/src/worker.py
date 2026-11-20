@@ -4,8 +4,9 @@ from redis import Redis
 from sqlalchemy import select
 from src.config.database import Session
 from src.models.run import Run
-from src.models import user,study,observation,review,audit
+from src.models import user,study,observation,review,audit,calibration
 from src.services.algorithm import calculate
+from src.services import calibrations
 from src.utils.serializers import checksum
 redis=Redis.from_url(os.environ['REDIS_URL'])
 Path('/app/artifacts').mkdir(exist_ok=True)
@@ -13,11 +14,17 @@ Path('/app/artifacts').mkdir(exist_ok=True)
 with Session() as db:
     pending=list(db.scalars(select(Run).where(Run.status.in_(['queued','running']))))
     for run in pending: redis.rpush('analysis-queue',run.id)
+with Session() as db:
+    for calibration_id in calibrations.recover(db):
+        redis.rpush('calibration-queue',calibration_id)
 while True:
     Path('/tmp/worker-heartbeat').touch()
-    job=redis.blpop('analysis-queue',timeout=2)
+    job=redis.blpop(['calibration-queue','analysis-queue'],timeout=2)
     if not job: continue
     id=int(job[1])
+    if job[0]==b'calibration-queue':
+        with Session() as db: calibrations.process(db,id)
+        continue
     with Session() as db:
         run=db.get(Run,id)
         if not run or run.status in ('completed','failed'): continue

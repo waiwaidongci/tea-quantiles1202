@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from sqlalchemy import text
 from redis import Redis
 from src.config.database import Base,engine
-from src.models import user,study,observation,run,review,audit
+from src.models import user,study,observation,run,review,audit,calibration
 from src.routes import auth,research
 from src.middlewares.errors import ErrorMiddleware
 from src.middlewares.rate_limit import RateLimitMiddleware
